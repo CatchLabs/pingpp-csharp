@@ -98,10 +98,10 @@ namespace Pingpp.Models
             return Mapper<Charge>.MapFromJson(ch);
         }
 
-        public static Charge Retrieve(string id)
+        public static async Task<Charge> Retrieve(string id)
         {
             var url = string.Format("{0}/{1}", BaseUrl, id);
-            var ch = Requestor.DoRequest(url, "GET");
+            var ch = await Requestor.DoRequestAsync(url, "GET");
             return Mapper<Charge>.MapFromJson(ch);
         }
 
