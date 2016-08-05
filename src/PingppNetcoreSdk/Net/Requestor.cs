@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
 using Pingpp.Exception;
@@ -15,6 +17,43 @@ namespace Pingpp.Net
 {
     internal class Requestor : Pingpp
     {
+        internal static HttpRequestMessage GetRequestNew(string path, string method, string sign)
+        {
+            HttpMethod Method;
+            switch (method)
+            {
+                case "POST":
+                    Method = HttpMethod.Post;
+                    break;
+                case "GET":
+                    Method = HttpMethod.Get;
+                    break;
+                case "PUT":
+                    Method = HttpMethod.Put;
+                    break;
+                case "DELETE":
+                    Method = HttpMethod.Delete;
+                    break;
+                default:
+                    throw new System.Exception("Unsupported method");
+            }
+            var req = new HttpRequestMessage(Method, path);
+            req.Headers.Add("Authorization", string.Format("Bearer {0}", ApiKey));
+            req.Headers.Add("Pingplusplus-Version", ApiVersion);
+            req.Headers.Add("Accept-Language", AcceptLanguage);
+            if (!string.IsNullOrEmpty(sign))
+            {
+                req.Headers.Add("Pingplusplus-Signature", sign);
+            }
+            req.Headers.UserAgent.ParseAdd("Pingpp C# SDK version" + Version);
+            //            req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json;charset=utf-8");
+
+            //            request.ContinueTimeout = DefaultReadAndWriteTimeout;
+            //            request.Method = method;
+            return req;
+
+        }
+
         internal static HttpWebRequest GetRequest(string path, string method, string sign)
         {
             var request = (HttpWebRequest)WebRequest.Create(ApiBase + path);
@@ -32,6 +71,13 @@ namespace Pingpp.Net
             return request;
         }
 
+        internal static string ReadString(HttpResponseMessage message)
+        {
+            var str = message.Content.ReadAsStringAsync();
+            str.Wait();
+            return str.Result;
+        }
+
         internal static string DoRequest(string path, string method, Dictionary<string, object> param = null)
         {
             if (string.IsNullOrEmpty(ApiKey))
@@ -43,17 +89,19 @@ namespace Pingpp.Net
             }
             try
             {
-                HttpWebRequest req;
-                Task<WebResponse> res;
+                HttpRequestMessage req;
+                var client = new HttpClient();
+                client.DefaultRequestHeaders.TryAddWithoutValidation("Content-Type", "application/json; charset=utf-8");
+                client.BaseAddress = new Uri(ApiBase);
+                Task<HttpResponseMessage> res;
                 method = method.ToUpper();
                 switch (method)
                 {
                     case "GET":
                     case "DELETE":
-                        req = GetRequest(path, method, "");
-                        res = req.GetResponseAsync();
+                        res = client.SendAsync(GetRequestNew(path, method, ""));
                         res.Wait();
-                        return res.Result == null ? null : ReadStream(res.Result.GetResponseStream());
+                        return res.Result == null ? null : ReadString(res.Result);
                     case "POST":
                     case "PUT":
                         if (param == null)
@@ -70,18 +118,21 @@ namespace Pingpp.Net
                         {
                             throw new PingppException("Sign request error." + e.Message);
                         }
-                        req = GetRequest(path, method, sign);
-                        var stream = req.GetRequestStreamAsync();
-                        stream.Wait();
-                        using (var streamWriter = new StreamWriter(stream.Result))
+
+                        req = GetRequestNew(path, method, sign);
+                        req.Content = new FormUrlEncodedContent(param.Select(it => new KeyValuePair<string, string>(it.Key, it.Value.ToString())));
+
+                        res = client.SendAsync(req);
+                        try
                         {
-                            streamWriter.Write(body);
-                            streamWriter.Flush();
-//                            streamWriter.Close();
+                            res.Wait();
                         }
-                        res = req.GetResponseAsync();
-                        res.Wait();
-                        return res.Result == null ? null : ReadStream(res.Result.GetResponseStream());
+                        catch (System.Exception ex)
+                        {
+                        }
+                        var str = ReadString(res.Result);
+                        if (!res.Result.IsSuccessStatusCode) throw new PingppException($"Response failed {str}");
+                        return str;
                     default:
                         return null;
                 }
