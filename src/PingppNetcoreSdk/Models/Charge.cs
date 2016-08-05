@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Pingpp.Net;
 
@@ -91,9 +92,9 @@ namespace Pingpp.Models
 
         private const string BaseUrl = "/v1/charges";
 
-        public static Charge Create(Dictionary<string, object> chParams)
+        public static async Task<Charge> Create(Dictionary<string, object> chParams)
         {
-            var ch = Requestor.DoRequest(BaseUrl, "POST", chParams);
+            var ch = await Requestor.DoRequestAsync(BaseUrl, "POST", chParams);
             return Mapper<Charge>.MapFromJson(ch);
         }
 

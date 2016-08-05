@@ -56,7 +56,7 @@ namespace Pingpp.Net
 
         internal static HttpWebRequest GetRequest(string path, string method, string sign)
         {
-            var request = (HttpWebRequest)WebRequest.Create(ApiBase + path);
+            var request = (HttpWebRequest) WebRequest.Create(ApiBase + path);
             request.Headers["Authorization"] = string.Format("Bearer {0}", ApiKey);
             request.Headers["Pingplusplus-Version"] = ApiVersion;
             request.Headers["Accept-Language"] = AcceptLanguage;
@@ -78,72 +78,75 @@ namespace Pingpp.Net
             return str.Result;
         }
 
-        internal static string DoRequest(string path, string method, Dictionary<string, object> param = null)
+        class AsyncRequsetException : System.Exception
+        {
+            public string Res;
+
+            public AsyncRequsetException(string res)
+            {
+                Res = res;
+            }
+        }
+
+        internal static async Task<string> DoRequestAsync(string path, string method,
+            Dictionary<string, object> param = null)
         {
             if (string.IsNullOrEmpty(ApiKey))
             {
                 throw new PingppException("No API key provided.  (HINT: set your API key using " +
-                "\"Pingpp::setApiKey(<API-KEY>)\".  You can generate API keys from " +
-                "the Pingpp web interface.  See https://pingxx.com/document/api for " +
-                "details.");
+                                          "\"Pingpp::setApiKey(<API-KEY>)\".  You can generate API keys from " +
+                                          "the Pingpp web interface.  See https://pingxx.com/document/api for " +
+                                          "details.");
             }
+
+            var client = new HttpClient {BaseAddress = new Uri(ApiBase)};
+            method = method.ToUpper();
+
+            if (method == "GET" || method == "DELETE")
+            {
+                var res = await client.SendAsync(GetRequestNew(path, method, ""));
+                var str = await res.Content.ReadAsStringAsync();
+                if (!res.IsSuccessStatusCode) throw new AsyncRequsetException(str);
+                return str;
+            }
+            else
+            {
+                if (param == null)
+                {
+                    throw new PingppException("Request params is empty");
+                }
+                var body = JsonConvert.SerializeObject(param, Formatting.Indented);
+                string sign;
+                try
+                {
+                    sign = RsaUtils.RsaSign(body, PrivateKey);
+                }
+                catch (System.Exception e)
+                {
+                    throw new PingppException("Sign request error." + e.Message);
+                }
+                var req = GetRequestNew(path, method, sign);
+                req.Content =
+                    new FormUrlEncodedContent(
+                        param.Select(it => new KeyValuePair<string, string>(it.Key, it.Value.ToString())));
+                var res = await client.SendAsync(req);
+                var str = await res.Content.ReadAsStringAsync();
+                if (!res.IsSuccessStatusCode) throw new AsyncRequsetException(str);
+                return str;
+            }
+        }
+
+        internal static string DoRequest(string path, string method, Dictionary<string, object> param = null)
+        {
+            var res = DoRequestAsync(path, method, param);
             try
             {
-                HttpRequestMessage req;
-                var client = new HttpClient();
-                client.DefaultRequestHeaders.TryAddWithoutValidation("Content-Type", "application/json; charset=utf-8");
-                client.BaseAddress = new Uri(ApiBase);
-                Task<HttpResponseMessage> res;
-                method = method.ToUpper();
-                switch (method)
-                {
-                    case "GET":
-                    case "DELETE":
-                        res = client.SendAsync(GetRequestNew(path, method, ""));
-                        res.Wait();
-                        return res.Result == null ? null : ReadString(res.Result);
-                    case "POST":
-                    case "PUT":
-                        if (param == null)
-                        {
-                            throw new PingppException("Request params is empty");
-                        }
-                        var body = JsonConvert.SerializeObject(param, Formatting.Indented);
-                        string sign;
-                        try
-                        {
-                            sign = RsaUtils.RsaSign(body, PrivateKey);
-                        }
-                        catch (System.Exception e)
-                        {
-                            throw new PingppException("Sign request error." + e.Message);
-                        }
-
-                        req = GetRequestNew(path, method, sign);
-                        req.Content = new FormUrlEncodedContent(param.Select(it => new KeyValuePair<string, string>(it.Key, it.Value.ToString())));
-
-                        res = client.SendAsync(req);
-                        try
-                        {
-                            res.Wait();
-                        }
-                        catch (System.Exception ex)
-                        {
-                        }
-                        var str = ReadString(res.Result);
-                        if (!res.Result.IsSuccessStatusCode) throw new PingppException($"Response failed {str}");
-                        return str;
-                    default:
-                        return null;
-                }
+                res.Wait();
+                return res.Result;
             }
-            catch (WebException e)
+            catch (AsyncRequsetException ex)
             {
-                if (e.Response == null) throw new WebException(e.Message);
-                var statusCode = ((HttpWebResponse)e.Response).StatusCode;
-                var errors = Mapper<Error>.MapFromJson(ReadStream(e.Response.GetResponseStream()), "error");
-
-                throw new PingppException(errors, statusCode, errors.ErrorType, errors.Message);
+                throw new PingppException($"request failed: {ex.Res}");
             }
         }
 
