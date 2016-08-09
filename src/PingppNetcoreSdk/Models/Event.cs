@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Pingpp.Net;
 
@@ -33,10 +34,10 @@ namespace Pingpp.Models
 
         private const string BaseUrl = "/v1/events";
 
-        public static Event Retrieve(string id)
+        public static async Task<Event> Retrieve(string id)
         {
             var url = string.Format("{0}/{1}", BaseUrl, id);
-            var evt = Requestor.DoRequest(url, "Get");
+            var evt = await Requestor.DoRequestAsync(url, "Get");
             return Mapper<Event>.MapFromJson(evt);
         }
 
